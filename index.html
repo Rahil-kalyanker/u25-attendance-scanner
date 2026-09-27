@@ -59,6 +59,7 @@
     .info { display: block !important; background: #dbeafe; color: #1e40af; }
     .manual { margin-top: 24px; border-top: 1px solid #ddd; padding-top: 15px; }
     .small { font-size: 13px; color: #6b7280; }
+    #submitFrame { display: none; }
   </style>
 </head>
 <body>
@@ -77,13 +78,16 @@
     <div class="manual">
       <b>Manual Check-in</b>
       <input id="manualId" placeholder="Enter registration ID">
-      <button onclick="manualCheckIn()">Check In</button>
+      <button id="manualButton" onclick="manualCheckIn()">Check In</button>
     </div>
+
     <p class="small">Camera access requires HTTPS and permission.</p>
   </main>
 
+  <!-- Cross-origin form submissions are sent to this hidden frame. -->
+  <iframe name="submitFrame" id="submitFrame"></iframe>
+
   <script>
-    // Replace this with your deployed Apps Script web app URL.
     const API_URL = "https://script.google.com/macros/s/AKfycbx6crcx2IqEI5XgiusJMXS9LKJO3AYJFhdkNkHIOASNviam6oItgqgSVUMmsiNgpb1Rxw/exec";
 
     let scanner = null;
@@ -145,6 +149,7 @@
 
     async function stopCamera() {
       if (!scanner || !running) return;
+
       try {
         await scanner.stop();
         await scanner.clear();
@@ -161,6 +166,7 @@
     function onScan(decodedText) {
       const now = Date.now();
       if (busy || (decodedText === lastScan && now - lastScanAt < 5000)) return;
+
       lastScan = decodedText.trim();
       lastScanAt = now;
       submitAttendance(lastScan);
@@ -168,67 +174,76 @@
 
     function manualCheckIn() {
       const id = document.getElementById("manualId").value.trim();
+
       if (!id) {
         message("Enter a registration ID.", "error");
         return;
       }
+
       submitAttendance(id);
     }
 
-    async function submitAttendance(id) {
+    function submitAttendance(id) {
       if (busy) return;
 
       const operator = document.getElementById("operator").value.trim();
+
       if (!operator) {
         message("Enter the check-in operator name first.", "error");
         return;
       }
+
       if (!id) {
         message("Registration ID is empty.", "error");
         return;
       }
-      if (API_URL.includes("PASTE_YOUR")) {
-        message("The Apps Script URL has not been configured yet.", "error");
+
+      if (!API_URL.endsWith("/exec")) {
+        message("Invalid Apps Script web app URL.", "error");
         return;
       }
 
       busy = true;
-      message("Checking registration...", "info");
+      document.getElementById("manualButton").disabled = true;
+      message("Sending attendance request...", "info");
 
       try {
-        // The Apps Script endpoint must be configured to accept this
-        // request from the external webpage.
-        const response = await fetch(API_URL, {
-          method: "POST",
-          headers: { "Content-Type": "text/plain;charset=utf-8" },
-          body: JSON.stringify({
-            action: "recordAttendance",
-            registrationId: id,
-            checkedInBy: operator
-          })
-        });
+        const form = document.createElement("form");
+        form.method = "POST";
+        form.action = API_URL;
+        form.target = "submitFrame";
+        form.style.display = "none";
 
-        const result = await response.json();
+        const fields = {
+          action: "recordAttendance",
+          registrationId: id,
+          checkedInBy: operator
+        };
 
-        if (result.success) {
-          message(
-            "✓ " + result.message +
-            "\nName: " + result.name +
-            "\nID: " + result.registrationId +
-            "\nTime: " + new Date(result.checkInTime).toLocaleString(),
-            "success"
-          );
-        } else {
-          message(result.message || "Attendance failed.", "error");
+        for (const [name, value] of Object.entries(fields)) {
+          const input = document.createElement("input");
+          input.type = "hidden";
+          input.name = name;
+          input.value = value;
+          form.appendChild(input);
         }
-      } catch (err) {
+
+        document.body.appendChild(form);
+        form.submit();
+        form.remove();
+
         message(
-          "Connection error: " + err.message +
-          "\nThe Apps Script backend still needs external-webpage support.",
-          "error"
+          "Attendance request submitted.\n\n" +
+          "Please check the Attendance sheet to confirm whether it was recorded.\n" +
+          "This page cannot verify the server's response.",
+          "info"
         );
+
+      } catch (err) {
+        message("Could not submit request: " + err.message, "error");
       } finally {
         busy = false;
+        document.getElementById("manualButton").disabled = false;
       }
     }
   </script>
