@@ -837,7 +837,7 @@ function recordAttendance(registrationId, checkedInBy) {
   }
 
   try {
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const ss = SpreadsheetApp.openById("1CYTmgL5AraFSJQIGBlcHSFyA2j8nE8HJc_Y9f7kD2iw");
     const registrationSheet = ss.getSheetByName(SHEET_NAME);
     const attendanceSheet = ss.getSheetByName(ATTENDANCE_SHEET_NAME);
 
@@ -929,7 +929,30 @@ function recordAttendance(registrationId, checkedInBy) {
 }
 
 
-function doGet() {
+function doGet(e) {
+  const data = (e && e.parameter) || {};
+
+  // GitHub Pages cannot read a normal cross-origin Apps Script response.
+  // JSONP lets the scanner receive the actual attendance result.
+  if (data.action === "recordAttendance") {
+    const callback = String(data.callback || "");
+
+    if (!/^[A-Za-z_$][0-9A-Za-z_$]*$/.test(callback)) {
+      return ContentService
+        .createTextOutput("/* Invalid callback */")
+        .setMimeType(ContentService.MimeType.JAVASCRIPT);
+    }
+
+    const result = recordAttendance(
+      data.registrationId,
+      data.checkedInBy
+    );
+
+    return ContentService
+      .createTextOutput(callback + "(" + JSON.stringify(result) + ");")
+      .setMimeType(ContentService.MimeType.JAVASCRIPT);
+  }
+
   return HtmlService
     .createHtmlOutputFromFile("Scanner")
     .setTitle("Under 25 Attendance Scanner");
