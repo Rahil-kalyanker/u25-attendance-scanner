@@ -6,6 +6,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Under 25 | Attendance Scanner</title>
   <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+
   <style>
     * { box-sizing: border-box; }
 
@@ -48,7 +49,7 @@
       cursor: pointer;
     }
 
-    button:disabled { background: #9ca3af; }
+    button:disabled { background: #9ca3af; cursor: not-allowed; }
     .secondary { background: #4b5563; }
 
     #reader { width: 100%; margin: 15px auto; }
@@ -75,6 +76,113 @@
     }
 
     .small { font-size: 13px; color: #6b7280; }
+
+    /* Popup overlay */
+    .popup-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      z-index: 9999;
+      background: rgba(0, 0, 0, 0.65);
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+
+    .popup-overlay.show {
+      display: flex;
+    }
+
+    .popup {
+      width: 100%;
+      max-width: 360px;
+      background: white;
+      border-radius: 20px;
+      padding: 30px 24px 24px;
+      text-align: center;
+      box-shadow: 0 15px 45px #0004;
+      animation: popupIn 0.25s ease-out;
+    }
+
+    @keyframes popupIn {
+      from { opacity: 0; transform: scale(0.85); }
+      to { opacity: 1; transform: scale(1); }
+    }
+
+    .popup-icon {
+      width: 76px;
+      height: 76px;
+      margin: 0 auto 16px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 42px;
+      font-weight: bold;
+    }
+
+    .popup-icon.success {
+      background: #dcfce7;
+      color: #16a34a;
+    }
+
+    .popup-icon.error {
+      background: #fee2e2;
+      color: #dc2626;
+    }
+
+    .popup-icon.warning {
+      background: #fef3c7;
+      color: #d97706;
+    }
+
+    .popup h2 {
+      margin: 0 0 10px;
+      font-size: 23px;
+    }
+
+    .popup-description {
+      color: #6b7280;
+      font-size: 14px;
+      line-height: 1.5;
+      margin-bottom: 18px;
+    }
+
+    .participant-details {
+      background: #f3f4f6;
+      border-radius: 12px;
+      padding: 14px;
+      margin: 16px 0;
+      text-align: left;
+      overflow-wrap: anywhere;
+    }
+
+    .detail-label {
+      color: #6b7280;
+      font-size: 12px;
+      margin-bottom: 4px;
+    }
+
+    .detail-value {
+      color: #111827;
+      font-weight: bold;
+      font-size: 15px;
+      margin-bottom: 12px;
+    }
+
+    .detail-value:last-child { margin-bottom: 0; }
+
+    .popup-button {
+      margin: 8px 0 0;
+      padding: 14px;
+      border-radius: 10px;
+      background: #16a34a;
+      color: white;
+      font-size: 16px;
+    }
+
+    .popup-button.error-button { background: #dc2626; }
+    .popup-button.warning-button { background: #d97706; }
   </style>
 </head>
 
@@ -107,6 +215,21 @@
     <p class="small">Camera access requires HTTPS and permission.</p>
   </main>
 
+  <!-- Attendance result popup -->
+  <div id="popupOverlay" class="popup-overlay">
+    <div class="popup" role="dialog" aria-modal="true" aria-labelledby="popupTitle">
+      <div id="popupIcon" class="popup-icon success">✓</div>
+      <h2 id="popupTitle">Attendance Successful!</h2>
+      <div id="popupDescription" class="popup-description">
+        Participant checked in successfully.
+      </div>
+      <div id="popupDetails" class="participant-details"></div>
+      <button id="popupButton" class="popup-button" onclick="closePopup()">
+        OK
+      </button>
+    </div>
+  </div>
+
   <script>
     // Cloudflare Worker URL
     const API_URL =
@@ -115,6 +238,7 @@
     let scanner = null;
     let running = false;
     let busy = false;
+    let popupOpen = false;
     let lastScan = "";
     let lastScanAt = 0;
     let requestTimeout = null;
@@ -123,6 +247,51 @@
       const el = document.getElementById("message");
       el.textContent = text;
       el.className = type;
+    }
+
+    function showPopup(type, title, description, details = []) {
+      const overlay = document.getElementById("popupOverlay");
+      const icon = document.getElementById("popupIcon");
+      const button = document.getElementById("popupButton");
+      const detailsBox = document.getElementById("popupDetails");
+
+      popupOpen = true;
+
+      icon.className = "popup-icon " + type;
+      icon.textContent =
+        type === "success" ? "✓" :
+        type === "warning" ? "!" : "×";
+
+      document.getElementById("popupTitle").textContent = title;
+      document.getElementById("popupDescription").textContent = description;
+
+      detailsBox.replaceChildren();
+
+      details.forEach(item => {
+        const label = document.createElement("div");
+        label.className = "detail-label";
+        label.textContent = item.label;
+
+        const value = document.createElement("div");
+        value.className = "detail-value";
+        value.textContent = item.value;
+
+        detailsBox.append(label, value);
+      });
+
+      detailsBox.style.display = details.length ? "block" : "none";
+
+      button.className = "popup-button";
+      if (type === "error") button.classList.add("error-button");
+      if (type === "warning") button.classList.add("warning-button");
+
+      overlay.classList.add("show");
+      button.focus();
+    }
+
+    function closePopup() {
+      document.getElementById("popupOverlay").classList.remove("show");
+      popupOpen = false;
     }
 
     async function startCamera() {
@@ -216,6 +385,7 @@
 
       if (
         busy ||
+        popupOpen ||
         (decodedText === lastScan && now - lastScanAt < 5000)
       ) {
         return;
@@ -240,7 +410,6 @@
 
     function finishAttendanceRequest() {
       busy = false;
-
       document.getElementById("manualButton").disabled = false;
 
       if (requestTimeout !== null) {
@@ -255,37 +424,65 @@
       if (payload && payload.success) {
         const when = payload.checkInTime
           ? new Date(payload.checkInTime).toLocaleString()
-          : "";
+          : "Not provided";
 
-        message(
-          "SUCCESS: " + (payload.name || "Participant") +
-          " checked in.\nRegistration ID: " +
-          (payload.registrationId || "") +
-          (when ? "\nTime: " + when : ""),
-          "success"
+        message("Attendance recorded successfully.", "success");
+
+        showPopup(
+          "success",
+          "Attendance Successful!",
+          "The participant has been checked in successfully.",
+          [
+            {
+              label: "Participant Name",
+              value: payload.name || "Participant"
+            },
+            {
+              label: "Registration ID",
+              value: payload.registrationId || ""
+            },
+            {
+              label: "Check-in Time",
+              value: when
+            }
+          ]
         );
       } else {
-        message(
+        const errorMessage =
           (payload && payload.message) ||
-          "Attendance could not be recorded.",
-          "error"
+          "Attendance could not be recorded.";
+
+        const duplicate = /already|duplicate|checked.?in/i.test(errorMessage);
+
+        message(errorMessage, "error");
+
+        showPopup(
+          duplicate ? "warning" : "error",
+          duplicate ? "Already Checked In!" : "Attendance Failed",
+          errorMessage
         );
       }
     }
 
     async function submitAttendance(id) {
-      if (busy) return;
+      if (busy || popupOpen) return;
 
       const operator =
         document.getElementById("operator").value.trim();
 
       if (!operator) {
         message("Enter the check-in operator name first.", "error");
+        showPopup(
+          "error",
+          "Operator Name Required",
+          "Please enter the check-in operator name before scanning."
+        );
         return;
       }
 
       if (!id) {
         message("Registration ID is empty.", "error");
+        showPopup("error", "Invalid QR Code", "Registration ID is empty.");
         return;
       }
 
@@ -298,6 +495,11 @@
         message(
           "The server did not respond in time. Check the Attendance sheet before retrying.",
           "error"
+        );
+        showPopup(
+          "warning",
+          "Request Timed Out",
+          "The server did not respond in time. Please check the Attendance sheet before retrying."
         );
       }, 20000);
 
@@ -326,18 +528,36 @@
           );
         }
 
+        // Ignore a late response after the timeout.
+        if (!busy) return;
+
         handleAttendanceResponse(payload);
 
       } catch (err) {
+        if (!busy) return;
+
         finishAttendanceRequest();
 
-        message(
+        const errorMessage =
           "Could not reach the attendance server. " +
-          (err.message || "Please try again."),
-          "error"
-        );
+          (err.message || "Please try again.");
+
+        message(errorMessage, "error");
+        showPopup("error", "Connection Error", errorMessage);
       }
     }
+
+    document.getElementById("popupOverlay").addEventListener("click", event => {
+      if (event.target.id === "popupOverlay") {
+        closePopup();
+      }
+    });
+
+    document.addEventListener("keydown", event => {
+      if (event.key === "Escape" && popupOpen) {
+        closePopup();
+      }
+    });
   </script>
 </body>
 </html>
